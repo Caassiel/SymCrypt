@@ -56,22 +56,18 @@ static wstring NormaliseWithoutSpaces(const wstring& t) {
     return stripSpaces(NormaliseWithSpaces(t));
 }
 
-static wchar_t Encrypt(const wchar_t& a, const wchar_t& b) {
-    if (a + b >= 0x044F) return a + b - 0x0450;
-    else return a + b;
+static wchar_t Encrypt(wchar_t a, wchar_t b) {
+    return (a - 0x0430 + b - 0x0430) % 32 + 0x0430;
 }
 
-static wchar_t Decrypt(const wchar_t& a, const wchar_t& b) {
-    if (a - b <= 0x0430) return a - b + 0x0450;
-    else return a - b;
+static wchar_t Decrypt(wchar_t a, wchar_t b) {
+    return ((a - 0x0430) - (b - 0x0430) + 32) % 32 + 0x0430;
 }
 
 static wstring EncryptText(const wstring& text, const wstring& key) {
     wstring r;
-    for (wchar_t c : text) {
-        for (wchar_t k : key) {
-            r += Encrypt(c, k);
-        }
+    for (size_t i = 0; i < text.size(); i++) {
+        r += Encrypt(text[i], key[i % key.size()]);
     }
     return r;
 }
@@ -87,16 +83,22 @@ int main()
 
     wstring text = decodeUtf8(bytes);
     wstring withoutSpaces = NormaliseWithoutSpaces(text);
-    string edited_text1 = encodeUtf8(withoutSpaces);
-    file1 << edited_text1 << "\n";
+    string initial_text = encodeUtf8(withoutSpaces);
+    file1 << initial_text << "\n";
 
     ofstream file2("output2.txt", ios::binary);
-    wstring key = L"ключ";
-    wstring edited_text = EncryptText(withoutSpaces, key);
-    string edited_text2 = encodeUtf8(edited_text);
 
-    file2 << edited_text2 << "\n";
+    wstring key2 = L"ой";
+    wstring key3 = L"шах";
+    wstring key4 = L"ключ";
+    wstring key5 = L"матан";
+    wstring key16 = L"наполеонбонапарт";
+
+
+    wstring text2 = EncryptText(withoutSpaces, key2);
+    string encoded_text2 = encodeUtf8(text2);
+
+    file2 << encoded_text2 << "\n";
 
     return 0;
 }
-
