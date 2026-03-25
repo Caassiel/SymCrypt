@@ -73,6 +73,54 @@ static wstring EncryptText(const wstring& text, const wstring& key) {
 }
 
 
+
+using CharFreq = map<wchar_t, long long>;
+using BigramFreq = map<pair<wchar_t,wchar_t>, long long>;
+
+struct Stats {
+    CharFreq  cf;
+    long long nc = 0;
+
+    BigramFreq  bo;
+    long long no = 0;
+
+    BigramFreq  bn;
+    long long nn = 0;
+};
+
+static Stats CalcStats(const wstring& t) {
+    Stats s;
+    for (wchar_t c : t) {
+        s.cf[c]++; s.nc++;
+    }
+
+    for (size_t i = 0; i + 1 < t.size(); ++i) {
+        s.bo[{t[i], t[i+1]}]++;
+        s.no++;
+    }
+    for (size_t i = 0; i + 1 < t.size(); i += 2) {
+        s.bn[{t[i], t[i+1]}]++;
+        s.nn++;
+    }
+    return s;
+}
+
+static double Index_of_coincidence(const wstring& t) {
+
+    double I = 0;
+    Stats s = CalcStats(t);
+    long long N = s.nc;
+
+    for (wchar_t c : t){
+        I += s.cf[c] * (s.cf[c] - 1);
+    }
+    I = I / (N * (N - 1));
+    return I;
+}
+
+
+
+
 int main()
 {
     const string& input = "input.txt";
@@ -83,8 +131,9 @@ int main()
 
     wstring text = decodeUtf8(bytes);
     wstring withoutSpaces = NormaliseWithoutSpaces(text);
+    double Ind1 = Index_of_coincidence(withoutSpaces);
     string initial_text = encodeUtf8(withoutSpaces);
-    file1 << initial_text << "\n";
+    file1 << initial_text << "\n\n" << "Index of Coincidence: " << Ind1 << "\n";
 
     ofstream file2("output2.txt", ios::binary);
 
@@ -95,8 +144,15 @@ int main()
     wstring key16 = L"наполеонбонапарт";
 
 
-    wstring text2 = EncryptText(withoutSpaces, key2);
+    wstring text2 = EncryptText(withoutSpaces, key16);
+    double Ind2 = Index_of_coincidence(text2);
     string encoded_text2 = encodeUtf8(text2);
+
+    file2 << encoded_text2 << "\n\n" << "Index of Coincidence: " << Ind2 << "\n";
+
+    return 0;
+}
+
 
     file2 << encoded_text2 << "\n";
 
