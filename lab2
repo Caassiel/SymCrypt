@@ -117,8 +117,8 @@ static double Index_of_coincidence(const wstring& t) {
     Stats s = CalcStats(t);
     long long N = s.nc;
 
-    for (wchar_t c : t){
-        I += s.cf[c] * (s.cf[c] - 1);
+    for (auto& [c, freq] : s.cf) {
+        I += freq * (freq - 1);
     }
     I = I / (N * (N - 1));
     return I;
@@ -126,13 +126,42 @@ static double Index_of_coincidence(const wstring& t) {
 
 static int Delta(const wstring& t, const int r) {
     int D = 0;
-    for (unsigned int i = 1; i < t.size() - r; i++){
+    for (unsigned int i = 0; i + r < t.size(); i++){
         if (t[i] == t[i+r]) D++;
     }
     return D;
 }
 
 
+static vector<wchar_t> TopChars(const wstring& group, int n = 3) {
+    map<wchar_t, int> freq;
+    for (wchar_t c : group) freq[c]++;
+
+    vector<pair<int, wchar_t>> sorted;
+    for (auto& [c, f] : freq) sorted.push_back({f, c});
+    sort(sorted.rbegin(), sorted.rend());
+
+    vector<wchar_t> result;
+    for (int i = 0; i < n && i < (int)sorted.size(); i++)
+        result.push_back(sorted[i].second);
+    return result;
+}
+
+static wchar_t GuessKeyChar(const wstring& group, wchar_t assumed_plain = L'о') {
+    wchar_t most_common = TopChars(group, 1)[0];
+    return (most_common - assumed_plain + 32) % 32 + 0x0430;
+}
+
+static wstring GuessKey(const wstring& ciphertext, int keylen) {
+    wstring key;
+    for (int i = 0; i < keylen; i++) {
+        wstring group;
+        for (size_t j = i; j < ciphertext.size(); j += keylen)
+            group += ciphertext[j];
+        key += GuessKeyChar(group);
+    }
+    return key;
+}
 
 
 int main()
@@ -167,23 +196,26 @@ int main()
 
     const string& example = "example.txt";
     ifstream in1(example, ios::binary);
-    if (!in) { cerr << "Error: cannot open input file\n"; return 1; }
+    if (!in1) { cerr << "Error: cannot open input file\n"; return 1; }
     ofstream file3("example_output.txt", ios::binary);
 
     string bytes2 { istreambuf_iterator<char>(in1), {} };
     wstring text3 = NormaliseWithoutSpaces(decodeUtf8(bytes2));
 
-    wstring key_attempt = L"неасиметричность";
+    wstring key_attempt = L"декелисоборойдей";
     wstring decoded_text = DecryptText(text3, key_attempt);
     string decoded_text2 = encodeUtf8(decoded_text);
     double Ind3 = Index_of_coincidence(decoded_text);
 
-    file3 << decoded_text2 << "\n\n" << "Index of Coincidence: " << Ind3 << "\n" << "Deltas: \n";
+    file3 << decoded_text2 << "\n\n" << "Index of Coincidence: " << Ind3 << "\n" << "Deltas: \n\n";
 
     for (int i = 1; i < 20; i++){
         file3 << i << "    " << Delta(text3, i) << "\n";
     }
 
+    int GuessedLength = 16;
+    wstring GuessedKey = GuessKey(text3, GuessedLength);
+    file3 << "Guessed key: " << encodeUtf8(GuessedKey) << "\n";
+
     return 0;
 }
-
