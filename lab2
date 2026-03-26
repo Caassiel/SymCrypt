@@ -72,7 +72,13 @@ static wstring EncryptText(const wstring& text, const wstring& key) {
     return r;
 }
 
-
+static wstring DecryptText(const wstring& text, const wstring& key) {
+    wstring r;
+    for (size_t i = 0; i < text.size(); i++) {
+        r += Decrypt(text[i], key[i % key.size()]);
+    }
+    return r;
+}
 
 using CharFreq = map<wchar_t, long long>;
 using BigramFreq = map<pair<wchar_t,wchar_t>, long long>;
@@ -118,6 +124,14 @@ static double Index_of_coincidence(const wstring& t) {
     return I;
 }
 
+static int Delta(const wstring& t, const int r) {
+    int D = 0;
+    for (unsigned int i = 1; i < t.size() - r; i++){
+        if (t[i] == t[i+r]) D++;
+    }
+    return D;
+}
+
 
 
 
@@ -150,11 +164,26 @@ int main()
 
     file2 << encoded_text2 << "\n\n" << "Index of Coincidence: " << Ind2 << "\n";
 
+
+    const string& example = "example.txt";
+    ifstream in1(example, ios::binary);
+    if (!in) { cerr << "Error: cannot open input file\n"; return 1; }
+    ofstream file3("example_output.txt", ios::binary);
+
+    string bytes2 { istreambuf_iterator<char>(in1), {} };
+    wstring text3 = NormaliseWithoutSpaces(decodeUtf8(bytes2));
+
+    wstring key_attempt = L"неасиметричность";
+    wstring decoded_text = DecryptText(text3, key_attempt);
+    string decoded_text2 = encodeUtf8(decoded_text);
+    double Ind3 = Index_of_coincidence(decoded_text);
+
+    file3 << decoded_text2 << "\n\n" << "Index of Coincidence: " << Ind3 << "\n" << "Deltas: \n";
+
+    for (int i = 1; i < 20; i++){
+        file3 << i << "    " << Delta(text3, i) << "\n";
+    }
+
     return 0;
 }
 
-
-    file2 << encoded_text2 << "\n";
-
-    return 0;
-}
