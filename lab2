@@ -164,6 +164,50 @@ static wstring GuessKey(const wstring& ciphertext, int keylen) {
 }
 
 
+static vector<double> LoadProbs(const string& filename) {
+    ifstream f(filename);
+    vector<double> probs(32, 0.0);
+    wstring_convert<codecvt_utf8<wchar_t>> conv;
+
+    string letter_utf8;
+    double p;
+    while (f >> letter_utf8 >> p) {
+        wstring letter = conv.from_bytes(letter_utf8);
+        if (!letter.empty()) {
+            int idx = toLower(letter[0]) - 0x0430;
+            if (idx >= 0 && idx < 32)
+                probs[idx] = p / 100.0;
+        }
+    }
+    return probs;
+}
+
+static double Mg(const wstring& block, int g, const vector<double>& probs) {
+
+    vector<long long> counts(32, 0);
+    for (wchar_t c : block)
+        counts[c - 0x0430]++;
+
+    double sum = 0.0;
+    for (int t = 0; t < 32; t++)
+        sum += probs[t] * counts[(t + g) % 32];
+
+    return sum;
+}
+
+static wchar_t BestShift(const wstring& block, const vector<double>& probs) {
+    int best_g = 0;
+    double best_score = -1.0;
+    for (int g = 0; g < 32; g++) {
+        double score = Mg(block, g, probs);
+        if (score > best_score) { best_score = score; best_g = g; }
+    }
+    return 0x0430 + best_g;
+}
+
+
+
+
 int main()
 {
     const string& input = "input.txt";
@@ -202,20 +246,32 @@ int main()
     string bytes2 { istreambuf_iterator<char>(in1), {} };
     wstring text3 = NormaliseWithoutSpaces(decodeUtf8(bytes2));
 
-    wstring key_attempt = L"декелисоборойдей";
+    wstring key_attempt = L"делолисоборотней";
     wstring decoded_text = DecryptText(text3, key_attempt);
     string decoded_text2 = encodeUtf8(decoded_text);
     double Ind3 = Index_of_coincidence(decoded_text);
 
     file3 << decoded_text2 << "\n\n" << "Index of Coincidence: " << Ind3 << "\n" << "Deltas: \n\n";
 
-    for (int i = 1; i < 20; i++){
+    for (int i = 1; i <= 32; i++){
         file3 << i << "    " << Delta(text3, i) << "\n";
     }
 
     int GuessedLength = 16;
     wstring GuessedKey = GuessKey(text3, GuessedLength);
-    file3 << "Guessed key: " << encodeUtf8(GuessedKey) << "\n";
+    file3 << "Guessed key: " << encodeUtf8(GuessedKey) << "\n\n";
+
+    vector<double> probs = LoadProbs("probs.txt");
+
+    wstring NewKey;
+    for (int i = 0; i < GuessedLength; i++) {
+        wstring block;
+        for (size_t j = i; j < text3.size(); j += GuessedLength)
+            block += text3[j];
+        NewKey += BestShift(block, probs);
+    }
+
+    file3 << "Recovered key: " << encodeUtf8(NewKey) << "\n\n";
 
     return 0;
 }
