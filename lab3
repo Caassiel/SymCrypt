@@ -7,6 +7,7 @@
 #include <codecvt>
 using namespace std;
 
+//print
 wstring decodeUtf8(const string& s) {
     wstring_convert<codecvt_utf8<wchar_t>> conv;
     return conv.from_bytes(s);
@@ -99,6 +100,47 @@ static void BigramMatrix(ostream& out, const BigramFreq& f, const vector<wchar_t
 }
 
 
+//math
+int gcdExtended(int a, int b, int &x, int &y) {
+    if (a == 0)  {
+        x = 0;
+        y = 1;
+        return b;
+    }
+
+    int x1, y1;
+    int gcd = gcdExtended(b%a, a, x1, y1);
+
+    x = y1 - (b/a) * x1;
+    y = x1;
+    return gcd;
+}
+
+int GCD(int a, int b) {
+    int x = 1, y = 1;
+    return gcdExtended(a, b, x, y);
+}
+
+vector<int> Solve_Linear_Congruence(int a, int b, int n){
+    vector<int> solutions;
+    int x, y;
+    int d = gcdExtended(a, n, x, y);
+
+    if (b % d != 0) return solutions;
+
+    int b1 = b / d;
+    int n1 = n / d;
+
+    int x0 = (x * b1) % n1;
+    if (x0 < 0) x0 += n1;
+
+    for (int k = 0; k < d; k++)
+        solutions.push_back((x0 + k * n1) % n);
+
+    return solutions;
+}
+
+
 
 int main()
 {
@@ -122,3 +164,4 @@ int main()
 
     return 0;
 }
+
