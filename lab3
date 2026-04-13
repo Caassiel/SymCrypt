@@ -183,7 +183,7 @@ void Attack(const Stats& s, const vector<wchar_t>& alpha, const wstring& text) {
     const int m = 31;
     const int M = m * m;
 
-    auto topCipher = Top_Bigrams(s.bn, 5);
+    auto topCipher = Top_Bigrams(s.bn, 15);
     auto mp = Build_Alphabet_Map(alpha);
 
     vector<pair<int,int>> common_plain = {
@@ -204,8 +204,11 @@ void Attack(const Stats& s, const vector<wchar_t>& alpha, const wstring& text) {
                     int X1 = encode_bigram(p1.first, p1.second, m);
                     int X2 = encode_bigram(p2.first, p2.second, m);
 
-                    int A = X1 - X2;
-                    int B = Y1 - Y2;
+                    int A = (X1 - X2) % M;
+                    if (A < 0) A += M;
+
+                    int B = (Y1 - Y2) % M;
+                    if (B < 0) B += M;
 
                     auto sols = Solve_Linear_Congruence(A, B, M);
 
@@ -217,14 +220,17 @@ void Attack(const Stats& s, const vector<wchar_t>& alpha, const wstring& text) {
 
                         wstring decrypted;
 
-                        for (wchar_t c : text) {
-                            if (!mp.count(c)) continue;
-
-                            int y = mp[c];
-                            int inv = mod_inverse(a, m);
-                            int x = (inv * (y - b % m + m)) % m;
-
-                            decrypted += alpha[x];
+                        int inv = mod_inverse(a, M);
+                        for (size_t i = 0; i + 1 < text.size(); i += 2) {
+                            if (!mp.count(text[i]) || !mp.count(text[i+1])) {
+                                decrypted += text[i];
+                                decrypted += text[i+1];
+                                continue;
+                            }
+                            int Y = mp[text[i]] * m + mp[text[i+1]];
+                            int X = (1LL * inv * ((Y - b + M) % M)) % M;
+                            decrypted += alpha[X / m];
+                            decrypted += alpha[X % m];
                         }
 
                         int score1 = 0; int score2 = 0;
@@ -232,27 +238,24 @@ void Attack(const Stats& s, const vector<wchar_t>& alpha, const wstring& text) {
                             if (c == L'о' || c == L'е' || c == L'а') score1++;
                         }
                         for (wchar_t c : decrypted) {
-                            if (c == L'ф' || c == L'щ' || c == L'ь') score2++;
+                            if (c == L'ф' || c == L'щ' || c == L'ь' || c == L'х' || c == L'ш' || c == L'ч') score2++;
                         }
                         double len = decrypted.size();
 
                         double freq_good = score1 / len;
                         double freq_bad  = score2 / len;
 
-                        if (freq_good < 0.08) continue;
-                        if (freq_bad  > 0.10) continue;
-
-                        cout << "Candidate a=" << a << " b=" << b << "\n";
-                        cout << encodeUtf8(decrypted.substr(0, 200)) << "\n\n";
+                        if (freq_good > 0.07 && freq_bad < 0.13) {
+                            cout << "Candidate:  a=" << a << " b=" << b << "\n";
+                            cout << encodeUtf8(decrypted.substr(0, 200)) << "\n";
+                            cout << "fg=" << freq_good << " fb=" << freq_bad << "\n\n";
+                        }
                     }
                 }
             }
         }
     }
 }
-
-
-
 
 
 int main()
@@ -281,7 +284,10 @@ int main()
 
     Attack(s, rev, wfile);
 
+    // a=654 b=777
+
     return 0;
 }
+
 
 
