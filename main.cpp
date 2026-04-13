@@ -1,0 +1,124 @@
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <algorithm>
+#include <map>
+#include <iomanip>
+#include <codecvt>
+using namespace std;
+
+wstring decodeUtf8(const string& s) {
+    wstring_convert<codecvt_utf8<wchar_t>> conv;
+    return conv.from_bytes(s);
+}
+
+string encodeUtf8(const wstring& s) {
+    wstring_convert<codecvt_utf8<wchar_t>> conv;
+    return conv.to_bytes(s);
+}
+
+using CharFreq = map<wchar_t, long long>;
+using BigramFreq = map<pair<wchar_t,wchar_t>, long long>;
+
+struct Stats {
+    CharFreq  cf;
+    long long nc = 0;
+
+    BigramFreq  bo;
+    long long no = 0;
+
+    BigramFreq  bn;
+    long long nn = 0;
+};
+
+static Stats CalcStats(const wstring& t) {
+    Stats s;
+    for (wchar_t c : t) {
+        s.cf[c]++; s.nc++;
+    }
+
+    for (size_t i = 0; i + 1 < t.size(); ++i) {
+        s.bo[{t[i], t[i+1]}]++;
+        s.no++;
+    }
+    for (size_t i = 0; i + 1 < t.size(); i += 2) {
+        s.bn[{t[i], t[i+1]}]++;
+        s.nn++;
+    }
+    return s;
+}
+
+static string symLabel(wchar_t c) {
+    if (c == L' ') return "[sp]";
+    wstring C; C += c;
+    return encodeUtf8(C);
+}
+
+static int displayCols(const string& s) {
+    int n = 0;
+    for (size_t i = 0; i < s.size(); ) {
+        unsigned char c = (unsigned char)s[i];
+        if      (c < 0x80) i += 1;
+        else if (c < 0xE0) i += 2;
+        else if (c < 0xF0) i += 3;
+        else               i += 4;
+        ++n;
+    }
+    return n;
+}
+
+static void printW(ostream& out, const string& s, int w, bool right = false) {
+    int pad = w - displayCols(s);
+    if (pad < 0) pad = 0;
+    if (right) { out << string(pad, ' ') << s; }
+    else       { out << s << string(pad, ' '); }
+}
+
+static void BigramMatrix(ostream& out, const BigramFreq& f, const vector<wchar_t>& alpha, const string& title) {
+    out << "\n  [" << title << "]\n";
+
+    long long mx = 1;
+    for (auto& [b, n] : f) mx = max(mx, n);
+    int cw = (int)to_string(mx).size() + 1;
+
+    out << "  ";
+    for (wchar_t c : alpha) printW(out, symLabel(c), cw, true);
+    out << "\n";
+
+    for (wchar_t row : alpha) {
+        printW(out, symLabel(row), 4, false);
+        for (wchar_t col : alpha) {
+            auto it = f.find({row, col});
+            if (it == f.end() || it->second == 0)
+                out << string(cw - 1, ' ') << ".";
+            else
+                out << setw(cw) << it->second;
+        }
+        out << "\n";
+    }
+}
+
+
+
+int main()
+{
+    const string& input = "05.txt";
+    ifstream in(input, ios::binary);
+    if (!in) { cerr << "Error: cannot open input file\n"; return 1; }
+    string bytes{ istreambuf_iterator<char>(in), {} };
+    ofstream file("output.txt", ios::binary);
+
+    wstring wfile = decodeUtf8(bytes);
+
+    Stats s = CalcStats(wfile);
+    vector<wchar_t> alpha;
+    for (auto& [c, n] : s.cf) alpha.push_back(c);
+    sort(alpha.begin(), alpha.end(), [&](wchar_t a, wchar_t b) {
+        return s.cf.at(a) > s.cf.at(b);
+    });
+    alpha.resize(30);
+
+    BigramMatrix(file, s.bo, alpha, "Bigrams");
+
+    return 0;
+}
