@@ -1,4 +1,5 @@
 #include <iostream>
+#include <vector>
 #include <cstdint>
 using namespace std;
 
@@ -7,63 +8,67 @@ using namespace std;
 // L_3 : p(x) = x^32 + x^7 + x^5 + x^3 + x^2 + x + 1
 // alpha = 0.01
 
-uint32_t L_1(uint32_t& start_state) {
+class LFSR {
 
-    uint64_t lsfr = start_state;
-    uint64_t bit = 0;
+private:
+    uint32_t start_state;
+    int Size;
+    vector<int> taps;
+    uint32_t mask;
 
-    bit  = ((lsfr >> 2) ^ (lsfr >> 26) ^ (lsfr >> 28) ^ (lsfr >> 31)) & 1;
-    lsfr = (lsfr >> 1) | (bit << 63);
+public:
+    LFSR(uint32_t seed, int n, vector<int> t){
+        Size = n;
+        taps = t;
+        mask = (1ULL << Size) - 1;
+        start_state = seed & mask;
+    }
 
-    return start_state & 1;
+    uint32_t next_bit() {
+        uint32_t output = start_state & 1;
+        uint32_t feedback = 0;
 
+        for (int t : taps) feedback ^= (start_state >> t) & 1;
+
+        start_state >>= 1;
+        start_state |= (feedback << (Size - 1));
+        start_state &= mask;
+
+        return output;
+    }
+};
+
+class Geffe_Generator {
+
+private:
+    LFSR L_1;
+    LFSR L_2;
+    LFSR L_3;
+
+public:
+
+    Geffe_Generator(uint32_t x, uint32_t y, uint32_t s):
+        L_1(x, 30, {29,5,3,0}),
+        L_2(y, 31, {30,2,0}),
+        L_3(s, 32, {31,6,4,2,1,0})
+    {}
+
+    uint32_t next_bit() {
+        uint32_t x = L_1.next_bit();
+        uint32_t y = L_2.next_bit();
+        uint32_t s = L_3.next_bit();
+
+        return (x & s) ^ ((s ^ 1) & y);
+    }
+};
+
+int main() {
+
+    Geffe_Generator g(1, 1, 1);
+
+    for (int i = 0; i < 2048; i++) {
+        cout << g.next_bit();
+    }
 }
 
-uint32_t L_2(uint32_t& start_state) {
-
-    uint32_t lsfr = start_state;
-    uint64_t bit = 0;
-
-    bit  = ((lsfr >> 1) ^ (lsfr >> 29)) & 1;
-    lsfr = (lsfr >> 1) | (bit << 63);
-
-    return start_state & 1;
-
-}
-
-uint32_t L_3(uint32_t& start_state) {
-
-    uint32_t lsfr = start_state;
-    uint64_t bit = 0;
-
-
-    bit  = ((lsfr >> 0) ^ (lsfr >> 25) ^ (lsfr >> 27) ^ (lsfr >> 29) ^ (lsfr >> 30) ^ (lsfr >> 31)) & 1;
-    lsfr = (lsfr >> 1) | (bit << 63);
-
-
-    return start_state & 1;
-
-}
-
-uint32_t Geffe_Generator(uint32_t& x, uint32_t& y, uint32_t& s){
-
-    uint32_t x1 = L_1(x);
-    uint32_t y1 = L_2(y);
-    uint32_t s1 = L_3(s);
-
-    return (x1&s1) ^ ((1 ^ s1)&y1);
-
-}
-
-
-int main()
-{
-    uint32_t x, y, s;
-
-    x = y = s = 1;
-
-    cout << Geffe_Generator(x, y, s);
-
-    return 0;
-}
 
