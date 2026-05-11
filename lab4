@@ -7,59 +7,63 @@ using namespace std;
 // L_3 : p(x) = x^32 + x^7 + x^5 + x^3 + x^2 + x + 1
 // alpha = 0.01
 
-static const uint32_t start_state = (1 << 16) | (1 << 8) | 1;
+uint32_t L_1(uint32_t& start_state) {
 
-uint32_t L_1() {
+    uint64_t lsfr = start_state;
+    uint64_t bit = 0;
 
-    uint32_t lsfr = start_state;
-    uint32_t bit;
-    uint32_t period = 0;
+    bit  = ((lsfr >> 2) ^ (lsfr >> 26) ^ (lsfr >> 28) ^ (lsfr >> 31)) & 1;
+    lsfr = (lsfr >> 1) | (bit << 63);
 
-    do {
-        bit  = ((lsfr >> 2) ^ (lsfr >> 26) ^ (lsfr >> 28) ^ (lsfr >> 31)) & 1ULL;
-        lsfr = (lsfr >> 1) | (bit << 63);
-        ++period;
-    } while (lsfr != start_state);
-
-    return period;
+    return start_state & 1;
 
 }
 
-uint32_t L_2() {
+uint32_t L_2(uint32_t& start_state) {
 
     uint32_t lsfr = start_state;
-    uint32_t bit;
-    uint32_t period = 0;
+    uint64_t bit = 0;
 
-    do {
-        bit  = ((lsfr >> 1) ^ (lsfr >> 29)) & 1ULL;
-        lsfr = (lsfr >> 1) | (bit << 63);
-        ++period;
-    } while (lsfr != start_state);
+    bit  = ((lsfr >> 1) ^ (lsfr >> 29)) & 1;
+    lsfr = (lsfr >> 1) | (bit << 63);
 
-    return period;
+    return start_state & 1;
 
 }
 
-uint32_t L_3() {
+uint32_t L_3(uint32_t& start_state) {
 
     uint32_t lsfr = start_state;
-    uint32_t bit;
-    uint32_t period = 0;
+    uint64_t bit = 0;
 
-    do {
-        bit  = ((lsfr >> 0) ^ (lsfr >> 25) ^ (lsfr >> 27) ^ (lsfr >> 29) ^ (lsfr >> 30) ^ (lsfr >> 31)) & 1ULL;
-        lsfr = (lsfr >> 1) | (bit << 63);
-        ++period;
-    } while (lsfr != start_state);
 
-    return period;
+    bit  = ((lsfr >> 0) ^ (lsfr >> 25) ^ (lsfr >> 27) ^ (lsfr >> 29) ^ (lsfr >> 30) ^ (lsfr >> 31)) & 1;
+    lsfr = (lsfr >> 1) | (bit << 63);
+
+
+    return start_state & 1;
+
+}
+
+uint32_t Geffe_Generator(uint32_t& x, uint32_t& y, uint32_t& s){
+
+    uint32_t x1 = L_1(x);
+    uint32_t y1 = L_2(y);
+    uint32_t s1 = L_3(s);
+
+    return (x1&s1) ^ ((1 ^ s1)&y1);
 
 }
 
 
 int main()
 {
+    uint32_t x, y, s;
+
+    x = y = s = 1;
+
+    cout << Geffe_Generator(x, y, s);
 
     return 0;
 }
+
