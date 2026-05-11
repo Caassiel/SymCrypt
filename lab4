@@ -1,40 +1,53 @@
 #include <iostream>
 #include <vector>
 #include <cstdint>
-using namespace std;
+#include <cmath>
+#include <omp.h>
+#include <fstream>
 
-// L_1 : p(x) = x^30 + x^6 + x^4 + x + 1
-// L_2 : p(x) = x^31 + x^3 + 1
-// L_3 : p(x) = x^32 + x^7 + x^5 + x^3 + x^2 + x + 1
-// alpha = 0.01
+using namespace std;
 
 class LFSR {
 
 private:
-    uint32_t start_state;
+    uint32_t state;
     int Size;
     vector<int> taps;
     uint32_t mask;
 
 public:
-    LFSR(uint32_t seed, int n, vector<int> t){
+
+    LFSR(uint32_t seed, int n, const vector<int>& t){
         Size = n;
         taps = t;
-        mask = (1ULL << Size) - 1;
-        start_state = seed & mask;
+        mask = (Size == 32) ? 0xFFFFFFFFu : ((1u << Size) - 1u);
+        state = seed & mask;
+
+        if (state == 0) state = 1;
     }
 
-    uint32_t next_bit() {
-        uint32_t output = start_state & 1;
+    inline uint32_t next_bit() {
+
+        uint32_t output = state & 1u;
         uint32_t feedback = 0;
 
-        for (int t : taps) feedback ^= (start_state >> t) & 1;
+        for (int t : taps) feedback ^= (state >> t) & 1u;
 
-        start_state >>= 1;
-        start_state |= (feedback << (Size - 1));
-        start_state &= mask;
+        state >>= 1;
+        state |= (feedback << (Size - 1));
+        state &= mask;
 
         return output;
+    }
+
+    void generate_packed(int N, vector<uint32_t>& out) {
+        int words = (N + 31) / 32;
+        out.assign(words, 0u);
+
+        for (int i = 0; i < N; i++) {
+            uint32_t bit = next_bit();
+            out[i >> 5] |= (bit << (i & 31));
+        }
     }
 };
 
@@ -53,22 +66,96 @@ public:
         L_3(s, 32, {31,6,4,2,1,0})
     {}
 
-    uint32_t next_bit() {
+    inline uint32_t next_bit() {
+
         uint32_t x = L_1.next_bit();
         uint32_t y = L_2.next_bit();
         uint32_t s = L_3.next_bit();
 
-        return (x & s) ^ ((s ^ 1) & y);
+        return (x & s) ^ ((s ^ 1u) & y);
     }
 };
 
-int main() {
+int popcount_match(const vector<uint32_t>& a, const vector<uint32_t>& b, int N){
+    int matches = 0;
+    int full_words = N / 32;
+    int rem = N % 32;
 
-    Geffe_Generator g(1, 1, 1);
-
-    for (int i = 0; i < 2048; i++) {
-        cout << g.next_bit();
+    for (int w = 0; w < full_words; w++) matches += __builtin_popcount(~(a[w] ^ b[w]));
+    if (rem) {
+        uint32_t mask = (1u << rem) - 1u;
+        matches += __builtin_popcount(~(a[full_words] ^ b[full_words]) & mask);
     }
+
+    return matches;
 }
+
+//    const double C =  N/2 + 2.576 * sqrt(3*N)/2;
+//    const double C = N - 6.1 * sqrt(N);
+int main() {
+    ifstream f("input.txt", ios::binary);
+    if (!f) { cerr << "Cannot open file\n"; return 1; }
+
+    int N = 0;
+    vector<uint32_t> observed_packed;
+    char byte;
+
+    const int N_MAX = 562;
+
+    while (f.read(&byte, 1) && N < N_MAX) {
+        if (N % 32 == 0)
+            observed_packed.push_back(0u);
+        observed_packed.back() |= ((uint32_t)(byte & 1) << (N % 32));
+        N++;
+    }
+
+    double threshold = 0.5 * N + 2.576 * sqrt((double)N) / 2.0;
+
+    int best_seed  = -1;
+    int best_score = -1;
+
+    #pragma omp parallel
+    {
+        int local_best_seed  = -1;
+        int local_best_score = -1;
+
+        #pragma omp for schedule(static)
+        for (int seed = 1; seed < (1 << 30); seed++) {
+            uint32_t state = (uint32_t)seed;
+            int score = 0;
+
+            for (int i = 0; i < N; i++) {
+                uint32_t bit = state & 1u;
+                uint32_t obs_bit = (observed_packed[i >> 5] >> (i & 31)) & 1u;
+                score += (bit == obs_bit);
+
+                uint32_t feedback = ((state >> 29) ^ (state >> 5) ^ (state >> 3)  ^ (state >> 0)) & 1u;
+                state = ((state >> 1) | (feedback << 29)) & 0x3FFFFFFFu;
+
+                if (score + (N - i - 1) < (int)threshold) break;
+            }
+
+            if (score > local_best_score && score >= (int)threshold) {
+                local_best_score = score;
+                local_best_seed  = seed;
+            }
+        }
+
+        #pragma omp critical
+        {
+            if (local_best_score > best_score) {
+                best_score = local_best_score;
+                best_seed  = local_best_seed;
+            }
+        }
+    }
+
+    cout << "Recovered L1 seed = " << best_seed << "\n";
+    cout << "Correlation score  = " << best_score << " / " << N << "\n";
+    cout << "Expected (correct) ≈ " << 3 * N / 4 << "\n";
+    cout << "Threshold          ≈ " << threshold  << "\n";
+    return 0;
+}
+
 
 
