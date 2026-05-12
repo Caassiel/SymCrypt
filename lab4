@@ -61,9 +61,9 @@ private:
 public:
 
     Geffe_Generator(uint32_t x, uint32_t y, uint32_t s):
-        L_1(x, 30, {29,5,3,0}),
-        L_2(y, 31, {30,2,0}),
-        L_3(s, 32, {31,6,4,2,1,0})
+        L_1(x, 30, {0,1,4,6}),
+        L_2(y, 31, {0,3}),
+        L_3(s, 32, {0,1,2,3,5,7})
     {}
 
     inline uint32_t next_bit() {
@@ -90,35 +90,80 @@ int popcount_match(const vector<uint32_t>& a, const vector<uint32_t>& b, int N){
     return matches;
 }
 
+
+
+int main() {
 //    const double C =  N/2 + 2.576 * sqrt(3*N)/2;
 //    const double C = N - 6.1 * sqrt(N);
-int main() {
+    const int N = 562;
+
+
     ifstream f("input.txt", ios::binary);
-    if (!f) { cerr << "Cannot open file\n"; return 1; }
-
-    /*
-    Geffe_Generator g(0x123ef0, 0x45abcd, 0x999aaa);
-    ofstream file("output.txt");
-
-    for (int i = 0; i < 2048; i++){
-        file << char('0' + g.next_bit());
-    }
-    */
-
-    int N = 0;
-    vector<uint32_t> observed_packed;
-    const int N_MAX = 562;
-
-    char c;
-    while (f.get(c) && N < N_MAX) {
-        if (c != '0' && c != '1') continue;
-        uint32_t bit = c - '0';
-        if (N % 32 == 0) observed_packed.push_back(0u);
-        observed_packed.back() |= (bit << (N % 32));
-        N++;
+    if (!f) {
+        cerr << "Cannot open file\n";
+        return 1;
     }
 
-    double threshold = 0.5* N + 6.1 * sqrt(3 * (double)N) / 2.0;
+    vector<uint32_t> observed_packed((N + 31) / 32, 0u);
+    char byte;
+
+    int i = 0;
+    while (f.read(&byte, 1) && i < N) {
+        observed_packed[i >> 5] |= ((uint32_t)(byte & 1) << (i & 31));
+        i++;
+    }
+
+    auto get_bit = [&](int idx) -> uint32_t {
+        return (observed_packed[idx >> 5] >> (idx & 31)) & 1u;
+    };
+
+    LFSR L1(812767230, 30, {0, 1, 4, 6});
+    LFSR L2(947930218, 31, {0, 3});
+
+    auto verify_seed = [&](int seed, int size, vector<int> taps, string name) {
+    LFSR reg(seed, size, taps);
+        int matches = 0;
+        for (int t = 0; t < N; t++)
+            matches += (reg.next_bit() == get_bit(t));  // wrong: this checks LFSR against z
+        // correct check: score should be ~3N/4 ≈ 422
+        cout << name << " seed " << seed << " scores " << matches << "/" << N << "\n";
+    };
+    verify_seed(812767230,  30, {0,1,4,6}, "L1");
+    verify_seed(947930218,  31, {0,3},     "L2");
+
+    vector<uint8_t> s_obs;
+
+    for (int t = 0; t < N; t++) {
+
+        uint32_t x = L1.next_bit();
+        uint32_t y = L2.next_bit();
+        uint32_t z = get_bit(t);
+
+        if (x == y) continue;
+        s_obs.push_back((z == x) ? 1 : 0);
+    }
+
+    LFSR verify_L3(1814788236, 32, {0,1,2,3,5,7});
+    int exact = 0;
+    for (int k = 0; k < (int)s_obs.size(); k++)
+        exact += (verify_L3.next_bit() == s_obs[k]);
+    cout << "L3 exact match: " << exact << "/" << s_obs.size() << "\n";
+
+    // Also verify full Geffe reconstruction
+    LFSR vL1(812767230, 30, {0,1,4,6});
+    LFSR vL2(947930218, 31, {0,3});
+    LFSR vL3(1814788236,  32, {0,1,2,3,5,7});
+    int geffe_match = 0;
+    for (int t = 0; t < N; t++) {
+        uint32_t x = vL1.next_bit();
+        uint32_t y = vL2.next_bit();
+        uint32_t s = vL3.next_bit();
+        uint32_t z = (x & s) ^ ((s ^ 1u) & y);
+        geffe_match += (z == get_bit(t));
+    }
+    cout << "Full Geffe reconstruction: " << geffe_match << "/" << N << "\n";
+
+
 
     int best_seed  = -1;
     int best_score = -1;
@@ -129,16 +174,17 @@ int main() {
         int local_best_score = -1;
 
         #pragma omp for schedule(static)
-        for (int seed = 1; seed < (1 << 30); seed++) {
-            LFSR candidate(seed, 30, {0,1,4,6});
+        for (uint64_t seed = 1; seed <= 0xFFFFFFFFu; seed++) {
+
+            LFSR cand(seed, 32, {0,1,2,3,5,7});
+
             int score = 0;
-            for (int i = 0; i < N; i++) {
-                uint32_t cand_bit = candidate.next_bit();
-                uint32_t obs_bit = (observed_packed[i >> 5] >> (i & 31)) & 1u;
-                score += (cand_bit == obs_bit);
+
+            for (int k = 0; k < (int)s_obs.size(); k++) {
+                score += (cand.next_bit() == s_obs[k]);
             }
 
-            if (score > local_best_score /*&& score >= (int)threshold*/) {
+            if (score > local_best_score) {
                 local_best_score = score;
                 local_best_seed  = seed;
             }
@@ -148,21 +194,18 @@ int main() {
         {
             if (local_best_score > best_score) {
                 best_score = local_best_score;
-                cout << "new best score: " << best_score << "\n";
                 best_seed  = local_best_seed;
-                cout << "new best seed: " << best_seed << "\n";
             }
         }
     }
 
-    cout << "Recovered L1 seed = " << best_seed << "\n";
-    cout << "Correlation score  = " << best_score << " / " << N << "\n";
-    cout << "Expected (correct) ≈ " << 3 * N / 4 << "\n";
-    cout << "Threshold          ≈ " << threshold  << "\n";
+    cout << "Recovered L3 seed = " << best_seed << "\n";
+    cout << "Correlation score  = " << best_score
+         << " / " << s_obs.size() << "\n";
 
-    // L1 seed = 812767230
     return 0;
 }
+
 
 
 
