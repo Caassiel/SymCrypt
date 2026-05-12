@@ -4,207 +4,231 @@
 #include <cmath>
 #include <omp.h>
 #include <fstream>
-
+#include <algorithm>
 using namespace std;
 
 class LFSR {
-
 private:
     uint32_t state;
     int Size;
     vector<int> taps;
     uint32_t mask;
-
 public:
-
-    LFSR(uint32_t seed, int n, const vector<int>& t){
+    LFSR(uint32_t seed, int n, const vector<int>& t) {
         Size = n;
         taps = t;
         mask = (Size == 32) ? 0xFFFFFFFFu : ((1u << Size) - 1u);
         state = seed & mask;
-
         if (state == 0) state = 1;
     }
-
     inline uint32_t next_bit() {
-
         uint32_t output = state & 1u;
         uint32_t feedback = 0;
-
         for (int t : taps) feedback ^= (state >> t) & 1u;
-
         state >>= 1;
         state |= (feedback << (Size - 1));
         state &= mask;
-
         return output;
     }
-
-    void generate_packed(int N, vector<uint32_t>& out) {
-        int words = (N + 31) / 32;
-        out.assign(words, 0u);
-
-        for (int i = 0; i < N; i++) {
-            uint32_t bit = next_bit();
-            out[i >> 5] |= (bit << (i & 31));
-        }
-    }
 };
 
-class Geffe_Generator {
+struct Candidate { uint32_t seed; int score; };
 
-private:
-    LFSR L_1;
-    LFSR L_2;
-    LFSR L_3;
-
-public:
-
-    Geffe_Generator(uint32_t x, uint32_t y, uint32_t s):
-        L_1(x, 30, {0,1,4,6}),
-        L_2(y, 31, {0,3}),
-        L_3(s, 32, {0,1,2,3,5,7})
-    {}
-
-    inline uint32_t next_bit() {
-
-        uint32_t x = L_1.next_bit();
-        uint32_t y = L_2.next_bit();
-        uint32_t s = L_3.next_bit();
-
-        return (x & s) ^ ((s ^ 1u) & y);
+vector<uint32_t> read_observed(const string& path, int N) {
+    ifstream f(path);
+    if (!f) { cerr << "Cannot open " << path << "\n"; exit(1); }
+    vector<uint32_t> packed((N + 31) / 32, 0u);
+    char c; int i = 0;
+    while (f.get(c) && i < N) {
+        if (c != '0' && c != '1') continue;
+        packed[i >> 5] |= ((uint32_t)(c - '0') << (i & 31));
+        i++;
     }
-};
+    return packed;
+}
 
-int popcount_match(const vector<uint32_t>& a, const vector<uint32_t>& b, int N){
-    int matches = 0;
-    int full_words = N / 32;
-    int rem = N % 32;
+inline uint32_t get_bit(const vector<uint32_t>& packed, int idx) {
+    return (packed[idx >> 5] >> (idx & 31)) & 1u;
+}
 
-    for (int w = 0; w < full_words; w++) matches += __builtin_popcount(~(a[w] ^ b[w]));
-    if (rem) {
-        uint32_t mask = (1u << rem) - 1u;
-        matches += __builtin_popcount(~(a[full_words] ^ b[full_words]) & mask);
+vector<uint8_t> build_s_obs(uint32_t seed1, uint32_t seed2, const vector<uint32_t>& observed, int N) {
+    LFSR L1(seed1, 30, {0,1,4,6});
+    LFSR L2(seed2, 31, {0,3});
+    vector<uint8_t> s_obs;
+    s_obs.reserve(N);
+    for (int t = 0; t < N; t++) {
+        uint32_t x = L1.next_bit();
+        uint32_t y = L2.next_bit();
+        uint32_t z = get_bit(observed, t);
+        if (x == y) continue;
+        s_obs.push_back((z == x) ? 1u : 0u);
     }
+    return s_obs;
+}
 
-    return matches;
+int geffe_score(uint32_t s1, uint32_t s2, uint32_t s3, const vector<uint32_t>& observed, int N) {
+    LFSR L1(s1, 30, {0,1,4,6});
+    LFSR L2(s2, 31, {0,3});
+    LFSR L3(s3, 32, {0,1,2,3,5,7});
+    int match = 0;
+    for (int t = 0; t < N; t++) {
+        uint32_t x = L1.next_bit(), y = L2.next_bit(), s = L3.next_bit();
+        uint32_t z = (x & s) ^ ((s ^ 1u) & y);
+        match += (z == get_bit(observed, t));
+    }
+    return match;
 }
 
 
+vector<Candidate> attack_lfsr(int lfsr_size, const vector<int>& taps, const vector<uint32_t>& observed, int N, int top_k, double threshold) {
+    uint64_t search_space = (lfsr_size == 32) ? 0x100000000ULL : (1ULL << lfsr_size);
 
-int main() {
-//    const double C =  N/2 + 2.576 * sqrt(3*N)/2;
-//    const double C = N - 6.1 * sqrt(N);
-    const int N = 562;
-
-
-    ifstream f("input.txt", ios::binary);
-    if (!f) {
-        cerr << "Cannot open file\n";
-        return 1;
-    }
-
-    vector<uint32_t> observed_packed((N + 31) / 32, 0u);
-    char byte;
-
-    int i = 0;
-    while (f.read(&byte, 1) && i < N) {
-        observed_packed[i >> 5] |= ((uint32_t)(byte & 1) << (i & 31));
-        i++;
-    }
-
-    auto get_bit = [&](int idx) -> uint32_t {
-        return (observed_packed[idx >> 5] >> (idx & 31)) & 1u;
-    };
-
-    LFSR L1(812767230, 30, {0, 1, 4, 6});
-    LFSR L2(947930218, 31, {0, 3});
-
-    auto verify_seed = [&](int seed, int size, vector<int> taps, string name) {
-    LFSR reg(seed, size, taps);
-        int matches = 0;
-        for (int t = 0; t < N; t++)
-            matches += (reg.next_bit() == get_bit(t));  // wrong: this checks LFSR against z
-        // correct check: score should be ~3N/4 ≈ 422
-        cout << name << " seed " << seed << " scores " << matches << "/" << N << "\n";
-    };
-    verify_seed(812767230,  30, {0,1,4,6}, "L1");
-    verify_seed(947930218,  31, {0,3},     "L2");
-
-    vector<uint8_t> s_obs;
-
-    for (int t = 0; t < N; t++) {
-
-        uint32_t x = L1.next_bit();
-        uint32_t y = L2.next_bit();
-        uint32_t z = get_bit(t);
-
-        if (x == y) continue;
-        s_obs.push_back((z == x) ? 1 : 0);
-    }
-
-    LFSR verify_L3(1814788236, 32, {0,1,2,3,5,7});
-    int exact = 0;
-    for (int k = 0; k < (int)s_obs.size(); k++)
-        exact += (verify_L3.next_bit() == s_obs[k]);
-    cout << "L3 exact match: " << exact << "/" << s_obs.size() << "\n";
-
-    // Also verify full Geffe reconstruction
-    LFSR vL1(812767230, 30, {0,1,4,6});
-    LFSR vL2(947930218, 31, {0,3});
-    LFSR vL3(1814788236,  32, {0,1,2,3,5,7});
-    int geffe_match = 0;
-    for (int t = 0; t < N; t++) {
-        uint32_t x = vL1.next_bit();
-        uint32_t y = vL2.next_bit();
-        uint32_t s = vL3.next_bit();
-        uint32_t z = (x & s) ^ ((s ^ 1u) & y);
-        geffe_match += (z == get_bit(t));
-    }
-    cout << "Full Geffe reconstruction: " << geffe_match << "/" << N << "\n";
-
-
-
-    int best_seed  = -1;
-    int best_score = -1;
+    int num_threads = omp_get_max_threads();
+    vector<vector<Candidate>> per_thread(num_threads);
 
     #pragma omp parallel
     {
-        int local_best_seed  = -1;
-        int local_best_score = -1;
+        int tid = omp_get_thread_num();
+        vector<Candidate>& local = per_thread[tid];
+
+        #pragma omp for schedule(static)
+        for (uint64_t seed = 1; seed < search_space; seed++) {
+            uint32_t state = (uint32_t)seed;
+            uint32_t mask  = (lfsr_size == 32) ? 0xFFFFFFFFu : ((1u << lfsr_size) - 1u);
+            int score = 0;
+
+            for (int i = 0; i < N; i++) {
+                uint32_t bit     = state & 1u;
+                uint32_t obs_bit = get_bit(observed, i);
+                score += (bit == obs_bit);
+
+                uint32_t feedback = 0;
+                for (int t : taps) feedback ^= (state >> t) & 1u;
+                state = ((state >> 1) | (feedback << (lfsr_size - 1))) & mask;
+
+                if (score + (N - i - 1) < (int)threshold) goto next_seed;
+            }
+
+            if (score >= (int)threshold) {
+                local.push_back({(uint32_t)seed, score});
+                if ((int)local.size() > top_k * 4) {
+                    sort(local.begin(), local.end(),
+                         [](auto& a, auto& b){ return a.score > b.score; });
+                    local.resize(top_k);
+                }
+            }
+            next_seed:;
+        }
+    }
+
+    vector<Candidate> all;
+    for (auto& v : per_thread)
+        all.insert(all.end(), v.begin(), v.end());
+
+    sort(all.begin(), all.end(),
+         [](auto& a, auto& b){ return a.score > b.score; });
+    if ((int)all.size() > top_k) all.resize(top_k);
+    return all;
+}
+
+vector<Candidate> attack_L3(const vector<uint8_t>& s_obs, int top_k) {
+    int M = (int)s_obs.size();
+    double threshold = 0.5 * M + 2.576 * sqrt((double)M) / 2.0;
+
+    int num_threads = omp_get_max_threads();
+    vector<vector<Candidate>> per_thread(num_threads);
+
+    #pragma omp parallel
+    {
+        int tid = omp_get_thread_num();
+        vector<Candidate>& local = per_thread[tid];
 
         #pragma omp for schedule(static)
         for (uint64_t seed = 1; seed <= 0xFFFFFFFFu; seed++) {
-
-            LFSR cand(seed, 32, {0,1,2,3,5,7});
-
+            LFSR cand((uint32_t)seed, 32, {0,1,2,3,5,7});
             int score = 0;
-
-            for (int k = 0; k < (int)s_obs.size(); k++) {
+            for (int k = 0; k < M; k++)
                 score += (cand.next_bit() == s_obs[k]);
-            }
 
-            if (score > local_best_score) {
-                local_best_score = score;
-                local_best_seed  = seed;
-            }
-        }
-
-        #pragma omp critical
-        {
-            if (local_best_score > best_score) {
-                best_score = local_best_score;
-                best_seed  = local_best_seed;
+            if (score >= (int)threshold) {
+                local.push_back({(uint32_t)seed, score});
+                if ((int)local.size() > top_k * 4) {
+                    sort(local.begin(), local.end(),
+                         [](auto& a, auto& b){ return a.score > b.score; });
+                    local.resize(top_k);
+                }
             }
         }
     }
 
-    cout << "Recovered L3 seed = " << best_seed << "\n";
-    cout << "Correlation score  = " << best_score
-         << " / " << s_obs.size() << "\n";
+    vector<Candidate> all;
+    for (auto& v : per_thread)
+        all.insert(all.end(), v.begin(), v.end());
+    sort(all.begin(), all.end(),
+         [](auto& a, auto& b){ return a.score > b.score; });
+    if ((int)all.size() > top_k) all.resize(top_k);
+    return all;
+}
 
+
+int main() {
+    const int N = 562;
+    const int TOP_K = 8;
+
+    vector<uint32_t> observed = read_observed("input.txt", N);
+
+    double thr_L1 = 0.5 * N + 2.576 * sqrt((double)N) / 2.0;
+    double thr_L2 = thr_L1;
+
+    cout << "Phase 1: attacking L1 \n";
+    auto L1_cands = attack_lfsr(30, {0,1,4,6}, observed, N, TOP_K, thr_L1);
+    cout << "Top L1 candidates:\n";
+    for (auto& c : L1_cands)
+        cout << "  seed=" << c.seed << "  score=" << c.score << "/" << N << "\n";
+
+    cout << "\nPhase 2: attacking L2 \n";
+    auto L2_cands = attack_lfsr(31, {0,3}, observed, N, TOP_K, thr_L2);
+    cout << "Top L2 candidates:\n";
+    for (auto& c : L2_cands)
+        cout << "  seed=" << c.seed << "  score=" << c.score << "/" << N << "\n";
+
+    cout << "\nPhase 3: attacking L3 for each (L1,L2) pair\n";
+
+    for (auto& c1 : L1_cands) {
+        for (auto& c2 : L2_cands) {
+            cout << "\nTrying L1=" << c1.seed << " L2=" << c2.seed << " ... ";
+
+            vector<uint8_t> s_obs = build_s_obs(c1.seed, c2.seed, observed, N);
+            cout << s_obs.size() << " usable s bits\n";
+
+            auto L3_cands = attack_L3(s_obs, TOP_K);
+            if (L3_cands.empty()) {
+                cout << "  No L3 candidate above threshold.\n";
+                continue;
+            }
+
+            for (auto& c3 : L3_cands) {
+                int gs = geffe_score(c1.seed, c2.seed, c3.seed, observed, N);
+                cout << "  L3=" << c3.seed
+                     << "  L3_score=" << c3.score << "/" << s_obs.size()
+                     << "  Geffe=" << gs << "/" << N;
+
+                if (gs == N) {
+                    cout << "\nSolution: \n";
+                    cout << "L1 seed = " << c1.seed << "\n";
+                    cout << "L2 seed = " << c2.seed << "\n";
+                    cout << "L3 seed = " << c3.seed << "\n";
+                    return 0;
+                }
+                cout << "\n";
+            }
+        }
+    }
+
+    cout << "\nNo exact solution found.\n";
     return 0;
 }
+
 
 
 
