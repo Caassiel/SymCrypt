@@ -96,20 +96,29 @@ int main() {
     ifstream f("input.txt", ios::binary);
     if (!f) { cerr << "Cannot open file\n"; return 1; }
 
+    /*
+    Geffe_Generator g(0x123ef0, 0x45abcd, 0x999aaa);
+    ofstream file("output.txt");
+
+    for (int i = 0; i < 2048; i++){
+        file << char('0' + g.next_bit());
+    }
+    */
+
     int N = 0;
     vector<uint32_t> observed_packed;
-    char byte;
-
     const int N_MAX = 562;
 
-    while (f.read(&byte, 1) && N < N_MAX) {
-        if (N % 32 == 0)
-            observed_packed.push_back(0u);
-        observed_packed.back() |= ((uint32_t)(byte & 1) << (N % 32));
+    char c;
+    while (f.get(c) && N < N_MAX) {
+        if (c != '0' && c != '1') continue;
+        uint32_t bit = c - '0';
+        if (N % 32 == 0) observed_packed.push_back(0u);
+        observed_packed.back() |= (bit << (N % 32));
         N++;
     }
 
-    double threshold = 0.5 * N + 2.576 * sqrt((double)N) / 2.0;
+    double threshold = 0.5* N + 6.1 * sqrt(3 * (double)N) / 2.0;
 
     int best_seed  = -1;
     int best_score = -1;
@@ -121,21 +130,15 @@ int main() {
 
         #pragma omp for schedule(static)
         for (int seed = 1; seed < (1 << 30); seed++) {
-            uint32_t state = (uint32_t)seed;
+            LFSR candidate(seed, 30, {29,5,3,0});
             int score = 0;
-
             for (int i = 0; i < N; i++) {
-                uint32_t bit = state & 1u;
+                uint32_t cand_bit = candidate.next_bit();
                 uint32_t obs_bit = (observed_packed[i >> 5] >> (i & 31)) & 1u;
-                score += (bit == obs_bit);
-
-                uint32_t feedback = ((state >> 29) ^ (state >> 5) ^ (state >> 3)  ^ (state >> 0)) & 1u;
-                state = ((state >> 1) | (feedback << 29)) & 0x3FFFFFFFu;
-
-                if (score + (N - i - 1) < (int)threshold) break;
+                score += (cand_bit == obs_bit);
             }
 
-            if (score > local_best_score && score >= (int)threshold) {
+            if (score > local_best_score /*&& score >= (int)threshold*/) {
                 local_best_score = score;
                 local_best_seed  = seed;
             }
@@ -145,7 +148,9 @@ int main() {
         {
             if (local_best_score > best_score) {
                 best_score = local_best_score;
+                cout << "new best score: " << best_score << "\n";
                 best_seed  = local_best_seed;
+                cout << "new best seed: " << best_seed << "\n";
             }
         }
     }
@@ -156,6 +161,7 @@ int main() {
     cout << "Threshold          ≈ " << threshold  << "\n";
     return 0;
 }
+
 
 
 
